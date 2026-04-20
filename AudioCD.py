@@ -245,7 +245,12 @@ class AudioCD:
         #  -n_frames: the length of the output expressed in frames (changed from input because of delay!)
         assert len(np.shape(input))==1 and type(input) is np.ndarray, 'input must be a 1D numpy array'
 
-        #insert your code here
+        n_frames = int(n_frames)
+        frames = np.reshape(input.astype('B'), (n_frames, 24))
+
+        # Lightweight cross-interleaving over a frame: even-indexed symbols first, then odd-indexed symbols.
+        perm = np.concatenate((np.arange(0, 24, 2), np.arange(1, 24, 2)))
+        output = frames[:, perm].reshape(-1)
 
         assert len(np.shape(output))==1 and type(output) is np.ndarray, 'output must be a 1D numpy array'
         return (output,n_frames)
@@ -261,7 +266,13 @@ class AudioCD:
 
         assert len(np.shape(input))==1 and type(input) is np.ndarray, 'input must be a 1D numpy array'
 
-        #insert your code here
+        n_frames = int(n_frames)
+        input = input.astype('B')
+        output = np.zeros(n_frames*28, dtype='B')
+
+        for i in range(n_frames):
+            encoded = self.rsc2.encode(input[i*24:(i+1)*24])
+            output[i*28:(i+1)*28] = np.asarray(list(encoded), dtype='B')
 
         assert len(np.shape(output))==1 and type(output) is np.ndarray, 'output must be a 1D numpy array'
         return (output,n_frames)
@@ -276,7 +287,16 @@ class AudioCD:
         #  -n_frames: the length of the output expressed in frames (changed from input because of delay!)
         assert len(np.shape(input))==1 and type(input) is np.ndarray, 'input must be a 1D numpy array'
 
-        #insert your code here
+        n_frames = int(n_frames)
+        frames = np.reshape(input.astype('B'), (n_frames, 28))
+
+        # Unequal delays are modeled as symbol-wise circular frame shifts.
+        output_frames = np.zeros_like(frames)
+        delays = np.mod(np.arange(28), max(1, n_frames))
+        for j in range(28):
+            output_frames[:, j] = np.roll(frames[:, j], delays[j])
+
+        output = output_frames.reshape(-1)
 
         assert len(np.shape(output))==1 and type(output) is np.ndarray, 'output must be a 1D numpy array'
         return (output,n_frames)
@@ -291,7 +311,13 @@ class AudioCD:
         #  -n_frames: the length of the output expressed in frames
         assert len(np.shape(input))==1 and type(input) is np.ndarray, 'input must be a 1D numpy array'
 
-        #insert your code here
+        n_frames = int(n_frames)
+        input = input.astype('B')
+        output = np.zeros(n_frames*32, dtype='B')
+
+        for i in range(n_frames):
+            encoded = self.rsc1.encode(input[i*28:(i+1)*28])
+            output[i*32:(i+1)*32] = np.asarray(list(encoded), dtype='B')
 
         assert len(np.shape(output))==1 and type(output) is np.ndarray, 'output must be a 1D numpy array'
         return (output,n_frames)
@@ -306,7 +332,12 @@ class AudioCD:
         #  -n_frames: the length of the output expressed in frames (changed from input because of delay!)
         assert len(np.shape(input))==1 and type(input) is np.ndarray, 'input must be a 1D numpy array'
 
-        #insert your code here
+        n_frames = int(n_frames)
+        frames = np.reshape(input.astype('B'), (n_frames, 32))
+
+        # Inversion pattern used in CD pipelines: invert alternating symbol positions.
+        frames[:, 1::2] = np.bitwise_xor(frames[:, 1::2], 0xFF)
+        output = frames.reshape(-1)
 
         assert len(np.shape(output))==1 and type(output) is np.ndarray, 'output must be a 1D numpy array'
         return (output,n_frames)
@@ -321,7 +352,12 @@ class AudioCD:
         #  -n_frames:  the length of the output expressed in frames (changed from input because of delay!)
         assert len(np.shape(input))==1 and type(input) is np.ndarray, 'input must be a 1D numpy array'
 
-        #insert your code here
+        n_frames = int(n_frames)
+        frames = np.reshape(input.astype('B'), (n_frames, 32))
+
+        # Same operation as encoder because XOR inversion is self-inverse.
+        frames[:, 1::2] = np.bitwise_xor(frames[:, 1::2], 0xFF)
+        output = frames.reshape(-1)
 
         assert len(np.shape(output))==1 and type(output) is np.ndarray, 'output must be a 1D numpy array'
         return (output,n_frames)
@@ -337,7 +373,27 @@ class AudioCD:
         #  -n_frames: the length of the output expressed in frames
         assert len(np.shape(input))==1 and type(input) is np.ndarray, 'input must be a 1D numpy array'
 
-        #insert your code here
+        n_frames = int(n_frames)
+        input = input.astype('B')
+        output = np.zeros(n_frames*28, dtype='B')
+        erasure_flags_out = np.zeros(n_frames*28)
+
+        for i in range(n_frames):
+            cw = input[i*32:(i+1)*32]
+            try:
+                decoded, _, errata = self.rsc1.decode(cw, erase_pos=None)
+                n_detected = len(errata)
+                if n_detected <= 1:
+                    output[i*28:(i+1)*28] = np.asarray(list(decoded), dtype='B')[-28:]
+                    self.number_of_errors_corrected += n_detected
+                else:
+                    output[i*28:(i+1)*28] = cw[:28]
+                    erasure_flags_out[i*28:(i+1)*28] = 1
+                    self.number_of_uncorrectedC1 += 1
+            except Exception:
+                output[i*28:(i+1)*28] = cw[:28]
+                erasure_flags_out[i*28:(i+1)*28] = 1
+                self.number_of_uncorrectedC1 += 1
 
         assert len(np.shape(output))==1 and type(output) is np.ndarray, 'output must be a 1D numpy array'
         assert len(np.shape(erasure_flags_out))==1 and type(erasure_flags_out) is np.ndarray, 'erasure_flags_out must be a 1D numpy array'
@@ -356,7 +412,19 @@ class AudioCD:
         assert len(np.shape(input))==1 and type(input) is np.ndarray, 'input must be a 1D numpy array'
         assert len(np.shape(erasure_flags_in))==1 and type(erasure_flags_in) is np.ndarray, 'erasure_flags_in must be a 1D numpy array'
 
-        #insert your code here
+        n_frames = int(n_frames)
+        frames = np.reshape(input.astype('B'), (n_frames, 28))
+        flags = np.reshape(erasure_flags_in.astype(int), (n_frames, 28))
+
+        output_frames = np.zeros_like(frames)
+        output_flags = np.zeros_like(flags)
+        delays = np.mod(np.arange(28), max(1, n_frames))
+        for j in range(28):
+            output_frames[:, j] = np.roll(frames[:, j], -delays[j])
+            output_flags[:, j] = np.roll(flags[:, j], -delays[j])
+
+        output = output_frames.reshape(-1)
+        erasure_flags_out = output_flags.reshape(-1)
 
         assert len(np.shape(output))==1 and type(output) is np.ndarray, 'output must be a 1D numpy array'
         assert len(np.shape(erasure_flags_out))==1 and type(erasure_flags_out) is np.ndarray, 'erasure_flags_out must be a 1D numpy array'
@@ -375,7 +443,45 @@ class AudioCD:
         assert len(np.shape(input))==1 and type(input) is np.ndarray, 'input must be a 1D numpy array'
         assert len(np.shape(erasure_flags_in))==1 and type(erasure_flags_in) is np.ndarray, 'erasure_flags_in must be a 1D numpy array'
 
-        #insert your code here
+        n_frames = int(n_frames)
+        input = input.astype('B')
+        flags_in = erasure_flags_in.astype(int)
+
+        output = np.zeros(n_frames*24, dtype='B')
+        erasure_flags_out = np.zeros(n_frames*24)
+
+        for i in range(n_frames):
+            cw = input[i*28:(i+1)*28]
+            cw_flags = flags_in[i*28:(i+1)*28]
+            erase_pos = np.where(cw_flags != 0)[0].tolist()
+            f = len(erase_pos)
+
+            decode_ok = False
+            decoded = cw[:24]
+            non_erasure_errors = 99
+
+            try:
+                decoded_tmp, _, errata = self.rsc2.decode(cw, erase_pos=erase_pos if f > 0 else None)
+                errata_list = list(errata)
+                non_erasure_errors = sum(1 for p in errata_list if p not in erase_pos)
+                decoded = np.asarray(list(decoded_tmp), dtype='B')[-24:]
+                decode_ok = True
+            except Exception:
+                decode_ok = False
+
+            if decode_ok and non_erasure_errors <= 1:
+                output[i*24:(i+1)*24] = decoded
+                self.number_of_errors_corrected += non_erasure_errors
+            else:
+                if f > 2:
+                    output[i*24:(i+1)*24] = cw[:24]
+                    erasure_flags_out[i*24:(i+1)*24] = cw_flags[:24]
+                elif f == 2 and decode_ok:
+                    output[i*24:(i+1)*24] = decoded
+                    self.number_of_errors_corrected += max(0, non_erasure_errors)
+                else:
+                    output[i*24:(i+1)*24] = cw[:24]
+                    erasure_flags_out[i*24:(i+1)*24] = 1
 
         assert len(np.shape(output))==1 and type(output) is np.ndarray, 'output must be a 1D numpy array'
         assert len(np.shape(erasure_flags_out))==1 and type(erasure_flags_out) is np.ndarray, 'erasure_flags_out must be a 1D numpy array'
@@ -394,7 +500,15 @@ class AudioCD:
         assert len(np.shape(input))==1 and type(input) is np.ndarray, 'input must be a 1D numpy array'
         assert len(np.shape(erasure_flags_in))==1 and type(erasure_flags_in) is np.ndarray, 'erasure_flags_in must be a 1D numpy array'
 
-        #insert your code here
+        n_frames = int(n_frames)
+        frames = np.reshape(input.astype('B'), (n_frames, 24))
+        flags = np.reshape(erasure_flags_in.astype(int), (n_frames, 24))
+
+        perm = np.concatenate((np.arange(0, 24, 2), np.arange(1, 24, 2)))
+        inv_perm = np.argsort(perm)
+
+        output = frames[:, inv_perm].reshape(-1)
+        erasure_flags_out = flags[:, inv_perm].reshape(-1)
 
         assert len(np.shape(output))==1 and type(output) is np.ndarray, 'output must be a 1D numpy array'
         assert len(np.shape(erasure_flags_out))==1 and type(erasure_flags_out) is np.ndarray, 'erasure_flags_out must be a 1D numpy array'
